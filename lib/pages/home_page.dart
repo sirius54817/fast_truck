@@ -8,6 +8,7 @@ import 'package:fast_truck/pages/driver_verification_page.dart';
 import 'package:fast_truck/pages/agent_verification_page.dart';
 import 'package:fast_truck/pages/available_drivers_page.dart';
 import 'package:fast_truck/pages/new_request_page.dart';
+import 'package:fast_truck/pages/request_details_page.dart';
 import 'package:fast_truck/ui/card.dart';
 
 enum UserMode { agent, driver }
@@ -1153,463 +1154,193 @@ class _DriverRequestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CardWidget(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: Colors.orange[100],
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Icon(
-                  Icons.inventory_2_outlined,
-                  size: 20,
-                  color: Colors.orange[700],
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      request.loadType,
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.grey[900],
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      _formatDate(request.createdAt),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.orange[50],
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: Colors.orange[200]!,
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => RequestDetailsPage(request: request),
+          ),
+        );
+      },
+      child: CardWidget(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Row(
+              children: [
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: Colors.orange[100],
+                    borderRadius: BorderRadius.circular(20),
                   ),
-                ),
-                child: Text(
-                  'Pending',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                  child: Icon(
+                    Icons.inventory_2_outlined,
+                    size: 20,
                     color: Colors.orange[700],
                   ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          const Divider(height: 1),
-          const SizedBox(height: 12),
-
-          // Details
-          Row(
-            children: [
-              Icon(
-                Icons.scale_outlined,
-                size: 16,
-                color: Colors.grey[600],
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Weight: ',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey[700],
-                ),
-              ),
-              Text(
-                '${request.weight} kg',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.grey[800],
-                ),
-              ),
-              const SizedBox(width: 16),
-              Icon(
-                Icons.straighten_outlined,
-                size: 16,
-                color: Colors.grey[600],
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Distance: ',
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey[700],
-                ),
-              ),
-              Text(
-                '${request.distance} km',
-                style: TextStyle(
-                  fontSize: 13,
-                  color: Colors.grey[800],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          
-          // Locations
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.grey[50],
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.grey[200]!),
-            ),
-            child: Column(
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.location_on,
-                      size: 16,
-                      color: Colors.green[600],
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Pickup',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                          Text(
-                            request.pickupLocation,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey[900],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(
-                      Icons.location_on,
-                      size: 16,
-                      color: Colors.red[600],
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Drop',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                          Text(
-                            request.dropLocation,
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: Colors.grey[900],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-
-          // Agent Contact Information
-          if (request.agentName != null || request.agencyName != null) ...[
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue[50],
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.blue[200]!),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.business_center,
-                        size: 16,
-                        color: Colors.blue[700],
-                      ),
-                      const SizedBox(width: 8),
                       Text(
-                        'Agent Information',
+                        request.loadType,
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.grey[900],
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        _formatDate(request.createdAt),
                         style: TextStyle(
                           fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.blue[900],
+                          color: Colors.grey[600],
                         ),
                       ),
                     ],
                   ),
-                  if (request.agentName != null) ...[
-                    const SizedBox(height: 8),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.person,
-                          size: 14,
-                          color: Colors.grey[700],
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Name: ',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey[700],
-                          ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            request.agentName!,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[900],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  if (request.agentPhone != null) ...[
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.phone,
-                          size: 14,
-                          color: Colors.grey[700],
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Phone: ',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey[700],
-                          ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            request.agentPhone!,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[900],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  if (request.agencyName != null) ...[
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.store,
-                          size: 14,
-                          color: Colors.grey[700],
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Agency: ',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey[700],
-                          ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            request.agencyName!,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[900],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                  if (request.agencyContact != null) ...[
-                    const SizedBox(height: 6),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          Icons.contact_phone,
-                          size: 14,
-                          color: Colors.grey[700],
-                        ),
-                        const SizedBox(width: 6),
-                        Text(
-                          'Contact: ',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.grey[700],
-                          ),
-                        ),
-                        Expanded(
-                          child: Text(
-                            request.agencyContact!,
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.grey[900],
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
+                ),
+                Icon(
+                  Icons.arrow_forward_ios,
+                  size: 16,
+                  color: Colors.grey[400],
+                ),
+              ],
             ),
             const SizedBox(height: 12),
-            // Call Agent Button
-            if (request.agentPhone != null)
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () => _makePhoneCall(context, request.agentPhone!),
-                  icon: const Icon(Icons.phone, size: 18),
-                  label: const Text('Call Agent'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green[600],
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+            const Divider(height: 1),
+            const SizedBox(height: 12),
+
+            // Details Row
+            Row(
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.scale_outlined,
+                        size: 16,
+                        color: Colors.grey[600],
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${request.weight} kg',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey[800],
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            const SizedBox(height: 16),
-          ],
-
-          // Action Button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {
-                _showAcceptDialog(context, request);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Theme.of(context).primaryColor,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+                Expanded(
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.straighten_outlined,
+                        size: 16,
+                        color: Colors.grey[600],
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${request.distance} km',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey[800],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Locations Preview
+            Row(
+              children: [
+                Icon(
+                  Icons.location_on,
+                  size: 16,
+                  color: Colors.green[600],
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    request.pickupLocation,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[700],
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(
+                  Icons.location_on,
+                  size: 16,
+                  color: Colors.red[600],
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    request.dropLocation,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[700],
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // View Details Hint
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(6),
               ),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
-                  Icon(Icons.check_circle_outline, size: 18),
-                  SizedBox(width: 8),
+                children: [
                   Text(
-                    'Accept Request',
+                    'Tap to view details',
                     style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
+                      fontSize: 12,
+                      color: Colors.grey[700],
+                      fontWeight: FontWeight.w500,
                     ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.touch_app,
+                    size: 14,
+                    color: Colors.grey[700],
                   ),
                 ],
               ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showAcceptDialog(BuildContext context, DeliveryRequestModel request) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        title: Row(
-          children: [
-            Icon(
-              Icons.info_outline,
-              color: Theme.of(context).primaryColor,
-            ),
-            const SizedBox(width: 12),
-            const Text('Accept Request'),
           ],
         ),
-        content: Text(
-          'Accept feature coming soon! You\'ll be able to accept delivery requests and start earning.',
-          style: const TextStyle(fontSize: 15),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
-          ),
-        ],
       ),
     );
-  }
-
-  Future<void> _makePhoneCall(BuildContext context, String phoneNumber) async {
-    final Uri phoneUri = Uri(scheme: 'tel', path: phoneNumber);
-    
-    try {
-      await launchUrl(phoneUri, mode: LaunchMode.externalApplication);
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Unable to open dialer: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
   }
 }
