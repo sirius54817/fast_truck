@@ -52,6 +52,9 @@ dependencies:
   google_places_flutter: ^2.0.10
   http: ^1.2.0
   
+  # Location Services
+  geolocator: ^12.0.0
+  
   # Image Picker
   image_picker: ^1.1.2
   

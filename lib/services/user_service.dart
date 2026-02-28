@@ -239,4 +239,26 @@ class UserService {
             .map((doc) => UserModel.fromJson(doc.data() as Map<String, dynamic>))
             .toList());
   }
+
+  // Update driver current pincode
+  Future<void> updateDriverCurrentPincode(String uid, String pincode) async {
+    try {
+      await _usersCollection.doc(uid).update({
+        'driverCurrentPincode': pincode,
+        'updatedAt': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      throw 'Failed to update driver pincode: $e';
+    }
+  }
+
+  // Get driver current pincode
+  Future<String?> getDriverCurrentPincode(String uid) async {
+    try {
+      final userData = await getUserData(uid);
+      return userData?.driverCurrentPincode;
+    } catch (e) {
+      return null;
+    }
+  }
 }

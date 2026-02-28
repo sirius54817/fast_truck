@@ -15,6 +15,7 @@ class UserModel {
   final String? vehiclePlate;
   final String? licensePlateImageUrl;
   final String? vehicleImageUrl;
+  final String? driverCurrentPincode;
   
   // Agent verification data
   final bool isAgentVerified;
@@ -39,6 +40,7 @@ class UserModel {
     this.vehiclePlate,
     this.licensePlateImageUrl,
     this.vehicleImageUrl,
+    this.driverCurrentPincode,
     this.isAgentVerified = false,
     this.agentName,
     this.agentPhone,
@@ -64,6 +66,7 @@ class UserModel {
       'vehiclePlate': vehiclePlate,
       'licensePlateImageUrl': licensePlateImageUrl,
       'vehicleImageUrl': vehicleImageUrl,
+      'driverCurrentPincode': driverCurrentPincode,
       'isAgentVerified': isAgentVerified,
       'agentName': agentName,
       'agentPhone': agentPhone,
@@ -92,6 +95,7 @@ class UserModel {
       vehiclePlate: json['vehiclePlate'] as String?,
       licensePlateImageUrl: json['licensePlateImageUrl'] as String?,
       vehicleImageUrl: json['vehicleImageUrl'] as String?,
+      driverCurrentPincode: json['driverCurrentPincode'] as String?,
       isAgentVerified: json['isAgentVerified'] as bool? ?? false,
       agentName: json['agentName'] as String?,
       agentPhone: json['agentPhone'] as String?,
@@ -117,6 +121,7 @@ class UserModel {
     String? vehiclePlate,
     String? licensePlateImageUrl,
     String? vehicleImageUrl,
+    String? driverCurrentPincode,
     bool? isAgentVerified,
     String? agentName,
     String? agentPhone,
@@ -139,6 +144,7 @@ class UserModel {
       vehiclePlate: vehiclePlate ?? this.vehiclePlate,
       licensePlateImageUrl: licensePlateImageUrl ?? this.licensePlateImageUrl,
       vehicleImageUrl: vehicleImageUrl ?? this.vehicleImageUrl,
+      driverCurrentPincode: driverCurrentPincode ?? this.driverCurrentPincode,
       isAgentVerified: isAgentVerified ?? this.isAgentVerified,
       agentName: agentName ?? this.agentName,
       agentPhone: agentPhone ?? this.agentPhone,

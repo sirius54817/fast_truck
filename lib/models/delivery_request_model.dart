@@ -11,6 +11,7 @@ class DeliveryRequestModel {
   final String pickupLocation;
   final double? pickupLatitude;
   final double? pickupLongitude;
+  final String? pickupPincode;
   final String dropLocation;
   final double? dropLatitude;
   final double? dropLongitude;
@@ -20,6 +21,7 @@ class DeliveryRequestModel {
   final DateTime? updatedAt;
   final String? driverId;
   final String? driverName;
+  final String? verificationCode;
 
   DeliveryRequestModel({
     required this.id,
@@ -34,6 +36,7 @@ class DeliveryRequestModel {
     required this.pickupLocation,
     this.pickupLatitude,
     this.pickupLongitude,
+    this.pickupPincode,
     required this.dropLocation,
     this.dropLatitude,
     this.dropLongitude,
@@ -43,6 +46,7 @@ class DeliveryRequestModel {
     this.updatedAt,
     this.driverId,
     this.driverName,
+    this.verificationCode,
   });
 
   // Convert to JSON for Firestore
@@ -60,6 +64,7 @@ class DeliveryRequestModel {
       'pickupLocation': pickupLocation,
       'pickupLatitude': pickupLatitude,
       'pickupLongitude': pickupLongitude,
+      'pickupPincode': pickupPincode,
       'dropLocation': dropLocation,
       'dropLatitude': dropLatitude,
       'dropLongitude': dropLongitude,
@@ -69,6 +74,7 @@ class DeliveryRequestModel {
       'updatedAt': updatedAt?.toIso8601String(),
       'driverId': driverId,
       'driverName': driverName,
+      'verificationCode': verificationCode,
     };
   }
 
@@ -87,6 +93,7 @@ class DeliveryRequestModel {
       pickupLocation: json['pickupLocation'] as String,
       pickupLatitude: json['pickupLatitude'] != null ? (json['pickupLatitude'] as num).toDouble() : null,
       pickupLongitude: json['pickupLongitude'] != null ? (json['pickupLongitude'] as num).toDouble() : null,
+      pickupPincode: json['pickupPincode'] as String?,
       dropLocation: json['dropLocation'] as String,
       dropLatitude: json['dropLatitude'] != null ? (json['dropLatitude'] as num).toDouble() : null,
       dropLongitude: json['dropLongitude'] != null ? (json['dropLongitude'] as num).toDouble() : null,
@@ -98,6 +105,7 @@ class DeliveryRequestModel {
           : null,
       driverId: json['driverId'] as String?,
       driverName: json['driverName'] as String?,
+      verificationCode: json['verificationCode'] as String?,
     );
   }
 
@@ -115,6 +123,7 @@ class DeliveryRequestModel {
     String? pickupLocation,
     double? pickupLatitude,
     double? pickupLongitude,
+    String? pickupPincode,
     String? dropLocation,
     double? dropLatitude,
     double? dropLongitude,
@@ -124,6 +133,7 @@ class DeliveryRequestModel {
     DateTime? updatedAt,
     String? driverId,
     String? driverName,
+    String? verificationCode,
   }) {
     return DeliveryRequestModel(
       id: id ?? this.id,
@@ -138,6 +148,7 @@ class DeliveryRequestModel {
       pickupLocation: pickupLocation ?? this.pickupLocation,
       pickupLatitude: pickupLatitude ?? this.pickupLatitude,
       pickupLongitude: pickupLongitude ?? this.pickupLongitude,
+      pickupPincode: pickupPincode ?? this.pickupPincode,
       dropLocation: dropLocation ?? this.dropLocation,
       dropLatitude: dropLatitude ?? this.dropLatitude,
       dropLongitude: dropLongitude ?? this.dropLongitude,
@@ -147,6 +158,7 @@ class DeliveryRequestModel {
       updatedAt: updatedAt ?? this.updatedAt,
       driverId: driverId ?? this.driverId,
       driverName: driverName ?? this.driverName,
+      verificationCode: verificationCode ?? this.verificationCode,
     );
   }
 }

@@ -20,7 +20,23 @@ class RequestDetailsPage extends StatefulWidget {
 
 class _RequestDetailsPageState extends State<RequestDetailsPage> {
   final _deliveryRequestService = DeliveryRequestService();
+  final _verificationCodeController = TextEditingController();
   bool _isProcessing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Listen to text changes to update button state
+    _verificationCodeController.addListener(() {
+      setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _verificationCodeController.dispose();
+    super.dispose();
+  }
 
   Future<void> _acceptRequest() async {
     setState(() => _isProcessing = true);
@@ -41,6 +57,22 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
               content: Text('Driver verification required. Please complete verification first.'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+        setState(() => _isProcessing = false);
+        return;
+      }
+
+      // Check if driver already has an active request
+      final hasActive = await _deliveryRequestService.hasActiveRequest(user.uid);
+      if (hasActive) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('You already have an active request. Please complete it first.'),
               backgroundColor: Colors.orange,
               duration: Duration(seconds: 3),
             ),
@@ -74,6 +106,62 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Failed to accept request: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isProcessing = false);
+      }
+    }
+  }
+
+  Future<void> _completeRequest() async {
+    // Check verification code if request is accepted or in progress
+    if (widget.request.status != 'pending') {
+      final enteredCode = _verificationCodeController.text.trim();
+      if (enteredCode.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please enter the verification code'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+      
+      if (enteredCode != widget.request.verificationCode) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Invalid verification code. Please check with the agent.'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 3),
+          ),
+        );
+        return;
+      }
+    }
+
+    setState(() => _isProcessing = true);
+
+    try {
+      await _deliveryRequestService.completeRequest(widget.request.id);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Request completed successfully!'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.pop(context, true); // Return to previous page
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to complete request: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -151,6 +239,80 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
         try {
           final String geoUrl = 'geo:${widget.request.pickupLatitude},${widget.request.pickupLongitude}'
               '?q=${widget.request.dropLatitude},${widget.request.dropLongitude}';
+          final Uri geoUri = Uri.parse(geoUrl);
+          launched = await launchUrl(geoUri, mode: LaunchMode.externalApplication);
+        } catch (e) {
+          launched = false;
+        }
+      }
+
+      // If all attempts failed, show error
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No map application found. Please install Google Maps.'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Unable to open maps: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _launchPickupNavigation() async {
+    try {
+      // Check if pickup coordinates are available
+      if (widget.request.pickupLatitude == null || widget.request.pickupLongitude == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Pickup location coordinates not available'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+        return;
+      }
+
+      bool launched = false;
+
+      // Try 1: Google Maps app URL scheme with navigation to pickup point
+      try {
+        final String googleMapsAppUrl = 
+            'google.navigation:q=${widget.request.pickupLatitude},${widget.request.pickupLongitude}';
+        final Uri appUri = Uri.parse(googleMapsAppUrl);
+        launched = await launchUrl(appUri, mode: LaunchMode.externalApplication);
+      } catch (e) {
+        launched = false;
+      }
+
+      // Try 2: Universal Google Maps URL (navigate to pickup from current location)
+      if (!launched) {
+        try {
+          final String googleMapsWebUrl = 
+              'https://www.google.com/maps/dir/?api=1'
+              '&destination=${widget.request.pickupLatitude},${widget.request.pickupLongitude}'
+              '&travelmode=driving';
+          final Uri webUri = Uri.parse(googleMapsWebUrl);
+          launched = await launchUrl(webUri, mode: LaunchMode.externalApplication);
+        } catch (e) {
+          launched = false;
+        }
+      }
+
+      // Try 3: Generic geo URI (fallback for any map app)
+      if (!launched) {
+        try {
+          final String geoUrl = 'geo:0,0?q=${widget.request.pickupLatitude},${widget.request.pickupLongitude}';
           final Uri geoUri = Uri.parse(geoUrl);
           launched = await launchUrl(geoUri, mode: LaunchMode.externalApplication);
         } catch (e) {
@@ -281,6 +443,43 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
                       widget.request.pickupLocation,
                       Colors.green,
                     ),
+                    if (widget.request.pickupPincode != null) ...[
+                      const SizedBox(height: 8),
+                      Padding(
+                        padding: const EdgeInsets.only(left: 32),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.blue[50],
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.blue[200]!),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.location_city, color: Colors.blue[700], size: 16),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Pincode: ',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: Colors.grey[700],
+                                ),
+                              ),
+                              Text(
+                                widget.request.pickupPincode!,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.blue[800],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     _buildLocationRow(
                       Icons.location_searching,
@@ -449,7 +648,7 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
                           widget.request.pickupLatitude != null && 
                           widget.request.pickupLongitude != null)
                         const SizedBox(width: 12),
-                      // Navigate Button
+                      // Navigate Button (Pickup -> Drop)
                       if (widget.request.pickupLatitude != null && 
                           widget.request.pickupLongitude != null)
                         Expanded(
@@ -470,14 +669,107 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
                     ],
                   ),
                   const SizedBox(height: 12),
+                  // Pickup Navigation Button
+                  if (widget.request.pickupLatitude != null && 
+                      widget.request.pickupLongitude != null)
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _launchPickupNavigation,
+                        icon: const Icon(Icons.location_on, size: 20),
+                        label: const Text('Navigate to Pickup'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange[600],
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 12),
                 ],
               ),
 
-            // Accept Request Button
+            // Verification Code Input (for accepted/in_progress requests)
+            if (widget.request.status != 'pending' && 
+                widget.request.status != 'completed' && 
+                widget.request.status != 'cancelled') ...[
+              const SizedBox(height: 16),
+              Card(
+                elevation: 2,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.lock_outline, color: Colors.blue[700]),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Verification Code',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey[900],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Enter the 4-digit code from the agent to complete delivery',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: _verificationCodeController,
+                        keyboardType: TextInputType.number,
+                        maxLength: 4,
+                        decoration: InputDecoration(
+                          hintText: 'Enter 4-digit code',
+                          prefixIcon: Icon(Icons.pin, color: Colors.blue[700]),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide(color: Colors.blue[700]!, width: 2),
+                          ),
+                          filled: true,
+                          fillColor: Colors.grey[50],
+                        ),
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 4,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Accept or Complete Request Button
             SizedBox(
               width: double.infinity,
               child: ElevatedButton.icon(
-                onPressed: _isProcessing ? null : _acceptRequest,
+                onPressed: _isProcessing 
+                    ? null 
+                    : (widget.request.status == 'pending' 
+                        ? _acceptRequest 
+                        : (_verificationCodeController.text.trim().length == 4
+                            ? _completeRequest 
+                            : null)),
                 icon: _isProcessing 
                     ? const SizedBox(
                         width: 20,
@@ -487,15 +779,30 @@ class _RequestDetailsPageState extends State<RequestDetailsPage> {
                           valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                         ),
                       )
-                    : const Icon(Icons.check_circle_outline, size: 20),
-                label: Text(_isProcessing ? 'Processing...' : 'Accept Request'),
+                    : Icon(
+                        widget.request.status == 'pending' 
+                            ? Icons.check_circle_outline 
+                            : Icons.check_circle,
+                        size: 20,
+                      ),
+                label: Text(
+                  _isProcessing 
+                      ? 'Processing...' 
+                      : (widget.request.status == 'pending' 
+                          ? 'Accept Request' 
+                          : 'Complete Delivery')
+                ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2C2C2C),
+                  backgroundColor: widget.request.status == 'pending' 
+                      ? const Color(0xFF2C2C2C)
+                      : Colors.green[700],
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
+                  disabledBackgroundColor: Colors.grey[400],
+                  disabledForegroundColor: Colors.grey[200],
                 ),
               ),
             ),

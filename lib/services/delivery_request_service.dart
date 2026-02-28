@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:fast_truck/models/delivery_request_model.dart';
 import 'package:fast_truck/services/user_service.dart';
@@ -18,6 +19,7 @@ class DeliveryRequestService {
     required String pickupLocation,
     double? pickupLatitude,
     double? pickupLongitude,
+    String? pickupPincode,
     required String dropLocation,
     double? dropLatitude,
     double? dropLongitude,
@@ -34,6 +36,10 @@ class DeliveryRequestService {
       // Fetch agent details from user service
       final agentData = await _userService.getUserData(agentId);
       
+      // Generate 4-digit verification code
+      final random = Random();
+      final verificationCode = (1000 + random.nextInt(9000)).toString();
+      
       final docRef = _requestsCollection.doc();
       final request = DeliveryRequestModel(
         id: docRef.id,
@@ -48,12 +54,14 @@ class DeliveryRequestService {
         pickupLocation: pickupLocation,
         pickupLatitude: pickupLatitude,
         pickupLongitude: pickupLongitude,
+        pickupPincode: pickupPincode,
         dropLocation: dropLocation,
         dropLatitude: dropLatitude,
         dropLongitude: dropLongitude,
         distance: distance,
         status: 'pending',
         createdAt: DateTime.now(),
+        verificationCode: verificationCode,
       );
 
       await docRef.set(request.toJson());
@@ -153,6 +161,24 @@ class DeliveryRequestService {
         });
   }
 
+  // Get pending requests filtered by pincode
+  Stream<List<DeliveryRequestModel>> getPendingRequestsByPincodeStream(String pincode) {
+    return _requestsCollection
+        .where('status', isEqualTo: 'pending')
+        .where('pickupPincode', isEqualTo: pincode)
+        .snapshots()
+        .map((snapshot) {
+          final requests = snapshot.docs
+              .map((doc) => DeliveryRequestModel.fromJson(doc.data() as Map<String, dynamic>))
+              .toList();
+          
+          // Sort by createdAt descending
+          requests.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          
+          return requests;
+        });
+  }
+
   // Update request status
   Future<void> updateRequestStatus(String requestId, String status) async {
     try {
@@ -198,6 +224,58 @@ class DeliveryRequestService {
       return null;
     } catch (e) {
       throw 'Failed to get request: $e';
+    }
+  }
+
+  // Get active request for a driver (accepted or in_progress)
+  Stream<DeliveryRequestModel?> getDriverActiveRequestStream(String driverId) {
+    return _requestsCollection
+        .where('driverId', isEqualTo: driverId)
+        .snapshots()
+        .map((snapshot) {
+          final allRequests = snapshot.docs
+              .map((doc) => DeliveryRequestModel.fromJson(doc.data() as Map<String, dynamic>))
+              .toList();
+          
+          // Find the first request that is accepted or in_progress
+          try {
+            return allRequests.firstWhere(
+              (req) => req.status == 'accepted' || req.status == 'in_progress',
+            );
+          } catch (e) {
+            return null; // No active request found
+          }
+        });
+  }
+
+  // Check if driver has an active request
+  Future<bool> hasActiveRequest(String driverId) async {
+    try {
+      final querySnapshot = await _requestsCollection
+          .where('driverId', isEqualTo: driverId)
+          .get();
+      
+      final activeRequests = querySnapshot.docs
+          .map((doc) => DeliveryRequestModel.fromJson(doc.data() as Map<String, dynamic>))
+          .where((req) => req.status == 'accepted' || req.status == 'in_progress')
+          .toList();
+      
+      return activeRequests.isNotEmpty;
+    } catch (e) {
+      throw 'Failed to check active requests: $e';
+    }
+  }
+
+  // Complete request
+  Future<void> completeRequest(String requestId) async {
+    try {
+      await _requestsCollection.doc(requestId).update({
+        'status': 'completed',
+        'completedAt': DateTime.now().toIso8601String(),
+        'updatedAt': DateTime.now().toIso8601String(),
+      });
+    } catch (e) {
+      throw 'Failed to complete request: $e';
     }
   }
 }

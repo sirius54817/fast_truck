@@ -9,7 +9,12 @@ import 'package:fast_truck/pages/agent_verification_page.dart';
 import 'package:fast_truck/pages/available_drivers_page.dart';
 import 'package:fast_truck/pages/new_request_page.dart';
 import 'package:fast_truck/pages/request_details_page.dart';
+import 'package:fast_truck/pages/agent_request_details_page.dart';
 import 'package:fast_truck/ui/card.dart';
+import 'package:fast_truck/config/app_config.dart';
+import 'package:http/http.dart' as http;
+import 'package:geolocator/geolocator.dart';
+import 'dart:convert';
 
 enum UserMode { agent, driver }
 
@@ -24,16 +29,26 @@ class _HomePageState extends State<HomePage> {
   UserMode _currentMode = UserMode.agent;
   final UserService _userService = UserService();
   final DeliveryRequestService _deliveryRequestService = DeliveryRequestService();
+  final TextEditingController _pincodeSearchController = TextEditingController();
   bool _isDriverVerified = false;
   bool _isAgentVerified = false;
   bool _isDriverOnline = false;
   bool _isRefreshing = false;
+  String? _searchPincode;
+  bool _isFetchingLocation = false;
 
   @override
   void initState() {
     super.initState();
     _loadVerificationStatus();
     _loadOnlineStatus();
+    _loadDriverPincode();
+  }
+
+  @override
+  void dispose() {
+    _pincodeSearchController.dispose();
+    super.dispose();
   }
 
   // Load both driver and agent verification status from database
@@ -97,6 +112,135 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // Load driver's saved pincode
+  Future<void> _loadDriverPincode() async {
+    final authService = AuthService();
+    final userId = authService.currentUser?.uid;
+    
+    if (userId != null) {
+      final pincode = await _userService.getDriverCurrentPincode(userId);
+      if (pincode != null && mounted) {
+        setState(() {
+          _searchPincode = pincode;
+          _pincodeSearchController.text = pincode;
+        });
+      }
+    }
+  }
+
+  // Fetch pincode from coordinates using Google Geocoding API
+  Future<String?> _fetchPincodeFromCoordinates(double latitude, double longitude) async {
+    try {
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/geocode/json'
+        '?latlng=$latitude,$longitude'
+        '&key=${AppConfig.googleMapsApiKey}',
+      );
+
+      final response = await http.get(url);
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        
+        if (data['status'] == 'OK' && data['results'] != null && data['results'].isNotEmpty) {
+          final results = data['results'] as List;
+          
+          for (var result in results) {
+            final addressComponents = result['address_components'] as List?;
+            
+            if (addressComponents != null) {
+              for (var component in addressComponents) {
+                final types = component['types'] as List?;
+                if (types != null && types.contains('postal_code')) {
+                  return component['long_name'] as String?;
+                }
+              }
+            }
+          }
+        }
+      }
+      return null;
+    } catch (e) {
+      debugPrint('Failed to fetch pincode from coordinates: $e');
+      return null;
+    }
+  }
+
+  // Get current location and extract pincode
+  Future<void> _getCurrentLocationPincode() async {
+    setState(() => _isFetchingLocation = true);
+
+    try {
+      // Check if location services are enabled
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        throw 'Location services are disabled. Please enable them in settings.';
+      }
+
+      // Check location permissions
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          throw 'Location permission denied';
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        throw 'Location permissions are permanently denied. Please enable them in app settings.';
+      }
+
+      // Get current position
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 10),
+      );
+
+      // Fetch pincode from coordinates
+      final pincode = await _fetchPincodeFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
+
+      if (pincode != null) {
+        setState(() {
+          _searchPincode = pincode;
+          _pincodeSearchController.text = pincode;
+        });
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Location detected: Pincode $pincode'),
+              backgroundColor: Colors.green,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        throw 'Unable to fetch pincode from your location';
+      }
+    } catch (e) {
+      debugPrint('Failed to get location pincode: $e');
+      
+      if (mounted) {
+        // Show error and prompt for manual entry
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$e'),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+        
+        // Fall back to manual pincode entry
+        await _showPincodeDialog();
+      }
+    } finally {
+      setState(() => _isFetchingLocation = false);
+    }
+  }
+
   // Update driver online status
   Future<void> _updateOnlineStatus(bool isOnline) async {
     final authService = AuthService();
@@ -104,6 +248,22 @@ class _HomePageState extends State<HomePage> {
     
     if (userId != null) {
       try {
+        if (isOnline) {
+          // When going online, fetch pincode automatically from location
+          if (_searchPincode == null || _searchPincode!.isEmpty) {
+            await _getCurrentLocationPincode();
+            if (_searchPincode == null || _searchPincode!.isEmpty) {
+              // User cancelled or location fetch failed without manual entry
+              return;
+            }
+          }
+          
+          // Save pincode to database
+          if (_searchPincode != null) {
+            await _userService.updateDriverCurrentPincode(userId, _searchPincode!);
+          }
+        }
+        
         await _userService.updateDriverOnlineStatus(userId, isOnline);
         setState(() {
           _isDriverOnline = isOnline;
@@ -120,6 +280,70 @@ class _HomePageState extends State<HomePage> {
         }
       }
     }
+  }
+
+  // Show dialog to enter pincode
+  Future<void> _showPincodeDialog() async {
+    final controller = TextEditingController(text: _searchPincode);
+    
+    return showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Enter Your Area Pincode'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Enter the pincode of your current location to find nearby delivery requests.',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              maxLength: 6,
+              decoration: InputDecoration(
+                labelText: 'Pincode',
+                hintText: 'e.g., 110001',
+                prefixIcon: const Icon(Icons.location_city),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context);
+            },
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              final pincode = controller.text.trim();
+              if (pincode.length == 6) {
+                setState(() {
+                  _searchPincode = pincode;
+                  _pincodeSearchController.text = pincode;
+                });
+                Navigator.pop(context);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Please enter a valid 6-digit pincode'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+              }
+            },
+            child: const Text('Confirm'),
+          ),
+        ],
+      ),
+    );
   }
 
   // Handle mode switching with verification check
@@ -612,75 +836,265 @@ class _HomePageState extends State<HomePage> {
         ),
         const SizedBox(height: 24),
 
-        // Available Requests
-        Text(
-          'Available Requests',
-          style: TextStyle(
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            color: Colors.grey[900],
+        // Active Request (if driver has one)
+        StreamBuilder<DeliveryRequestModel?>(
+          stream: _deliveryRequestService.getDriverActiveRequestStream(
+            AuthService().currentUser?.uid ?? '',
           ),
-        ),
-        const SizedBox(height: 16),
-        StreamBuilder<List<DeliveryRequestModel>>(
-          stream: _deliveryRequestService.getPendingRequestsStream(),
-          builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
-              return CardWidget(
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24.0),
-                    child: CircularProgressIndicator(),
+          builder: (context, activeSnapshot) {
+            final activeRequest = activeSnapshot.data;
+            
+            // Show active request section if there is one
+            if (activeRequest != null) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Active Request',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[900],
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 16),
+                  _ActiveRequestCard(request: activeRequest),
+                  const SizedBox(height: 24),
+                ],
               );
             }
-
-            if (snapshot.hasError) {
-              return CardWidget(
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
+            
+            // If no active request, show available requests
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Available Requests',
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey[900],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                
+                // Pincode Search Field
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.blue[200]!),
+                  ),
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.error_outline,
-                        size: 48,
-                        color: Colors.red[300],
+                      Row(
+                        children: [
+                          Icon(Icons.search, color: Colors.blue[700], size: 20),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Search by Area Pincode',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue[900],
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 12),
-                      Text(
-                        'Error loading requests',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey[700],
-                        ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: _pincodeSearchController,
+                              keyboardType: TextInputType.number,
+                              maxLength: 6,
+                              decoration: InputDecoration(
+                                hintText: 'Enter pincode (e.g., 110001)',
+                                prefixIcon: const Icon(Icons.location_city),
+                                suffixIcon: _pincodeSearchController.text.isNotEmpty
+                                    ? IconButton(
+                                        icon: const Icon(Icons.clear),
+                                        onPressed: () {
+                                          setState(() {
+                                            _pincodeSearchController.clear();
+                                            _searchPincode = null;
+                                          });
+                                        },
+                                      )
+                                    : null,
+                                counterText: '',
+                                filled: true,
+                                fillColor: Colors.white,
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(color: Colors.grey[300]!),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(color: Colors.grey[300]!),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(8),
+                                  borderSide: BorderSide(color: Colors.blue[600]!, width: 2),
+                                ),
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              ),
+                              onChanged: (value) {
+                                // Only search when 6 digits are entered
+                                if (value.length == 6) {
+                                  setState(() {
+                                    _searchPincode = value;
+                                  });
+                                } else if (_searchPincode != null) {
+                                  setState(() {
+                                    _searchPincode = null;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          ElevatedButton.icon(
+                            onPressed: () {
+                              final pincode = _pincodeSearchController.text.trim();
+                              if (pincode.length == 6) {
+                                setState(() {
+                                  _searchPincode = pincode;
+                                });
+                                // Save pincode to database
+                                final authService = AuthService();
+                                final userId = authService.currentUser?.uid;
+                                if (userId != null) {
+                                  _userService.updateDriverCurrentPincode(userId, pincode);
+                                }
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Please enter a valid 6-digit pincode'),
+                                    backgroundColor: Colors.red,
+                                  ),
+                                );
+                              }
+                            },
+                            icon: const Icon(Icons.search, size: 20),
+                            label: const Text('Search'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue[700],
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
-              );
-            }
+                const SizedBox(height: 16),
+                
+                // Show requests only if pincode is entered
+                if (_searchPincode == null || _searchPincode!.isEmpty)
+                  CardWidget(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.search_off,
+                            size: 48,
+                            color: Colors.grey[400],
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Enter Pincode to Search',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey[700],
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Enter your area pincode above to find available delivery requests nearby',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  StreamBuilder<List<DeliveryRequestModel>>(
+                    stream: _deliveryRequestService.getPendingRequestsByPincodeStream(_searchPincode!),
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return CardWidget(
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(24.0),
+                              child: CircularProgressIndicator(),
+                            ),
+                          ),
+                        );
+                      }
 
-            final pendingRequests = snapshot.data ?? [];
+                      if (snapshot.hasError) {
+                        return CardWidget(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16.0),
+                            child: Column(
+                              children: [
+                                Icon(
+                                  Icons.error_outline,
+                                  size: 48,
+                                  color: Colors.red[300],
+                                ),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'Error loading requests',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                    color: Colors.grey[700],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }
 
-            if (pendingRequests.isEmpty) {
-              return CardWidget(
-                child: _EmptyState(
-                  icon: Icons.local_shipping_outlined,
-                  message: 'No requests available',
-                  description: 'New delivery requests will appear here',
-                ),
-              );
-            }
+                      final pendingRequests = snapshot.data ?? [];
 
-            return Column(
-              children: pendingRequests.map((request) => 
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 12),
-                  child: _DriverRequestCard(request: request),
-                )
-              ).toList(),
+                      if (pendingRequests.isEmpty) {
+                        return CardWidget(
+                          child: _EmptyState(
+                            icon: Icons.local_shipping_outlined,
+                            message: 'No requests in pincode $_searchPincode',
+                            description: 'Try searching with a different pincode',
+                          ),
+                        );
+                      }
+
+                      return Column(
+                        children: pendingRequests.map((request) => 
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 12),
+                            child: _DriverRequestCard(request: request),
+                          )
+                        ).toList(),
+                      );
+                    },
+                  ),
+              ],
             );
           },
         ),
@@ -991,98 +1405,167 @@ class _RequestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header with status
-          Row(
-            children: [
-              Expanded(
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.local_shipping_outlined,
-                      size: 20,
+    return InkWell(
+      onTap: request.status != 'pending' && request.status != 'cancelled'
+          ? () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => AgentRequestDetailsPage(request: request),
+                ),
+              );
+            }
+          : null,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey[200]!),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with status
+            Row(
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.local_shipping_outlined,
+                        size: 20,
+                        color: _getStatusColor(),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          request.loadType,
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey[900],
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _getStatusColor().withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _getStatusColor().withOpacity(0.3),
+                    ),
+                  ),
+                  child: Text(
+                    _getStatusLabel(),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
                       color: _getStatusColor(),
                     ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Details
+            _DetailRow(
+              icon: Icons.scale_outlined,
+              label: 'Weight',
+              value: '${request.weight} kg',
+            ),
+            const SizedBox(height: 8),
+            _DetailRow(
+              icon: Icons.location_on_outlined,
+              label: 'Pickup',
+              value: request.pickupLocation,
+            ),
+            const SizedBox(height: 8),
+            _DetailRow(
+              icon: Icons.location_searching_outlined,
+              label: 'Drop',
+              value: request.dropLocation,
+            ),
+            const SizedBox(height: 8),
+            _DetailRow(
+              icon: Icons.straighten_outlined,
+              label: 'Distance',
+              value: '${request.distance} km',
+            ),
+            if (request.driverName != null) ...[
+              const SizedBox(height: 8),
+              _DetailRow(
+                icon: Icons.person_outline,
+                label: 'Driver',
+                value: request.driverName!,
+              ),
+            ],
+            if (request.verificationCode != null && request.status != 'pending') ...[
+              const SizedBox(height: 12),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.blue[200]!),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.lock_outline, size: 20, color: Colors.blue[700]),
                     const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        request.loadType,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.grey[900],
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                    Text(
+                      'Verification Code:',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[700],
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    Text(
+                      request.verificationCode!,
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.blue[700],
+                        letterSpacing: 4,
+                      ),
+                    ),
+                    const Spacer(),
+                    Icon(Icons.arrow_forward_ios, size: 16, color: Colors.grey[400]),
                   ],
                 ),
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: _getStatusColor().withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: _getStatusColor().withOpacity(0.3),
+            ],
+            if (request.status != 'pending' && request.status != 'cancelled' && 
+                (request.verificationCode == null || request.status == 'pending')) ...[
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Icon(Icons.touch_app, size: 14, color: Colors.grey[500]),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Tap for details',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[500],
+                      fontStyle: FontStyle.italic,
+                    ),
                   ),
-                ),
-                child: Text(
-                  _getStatusLabel(),
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: _getStatusColor(),
-                  ),
-                ),
+                ],
               ),
             ],
-          ),
-          const SizedBox(height: 12),
-
-          // Details
-          _DetailRow(
-            icon: Icons.scale_outlined,
-            label: 'Weight',
-            value: '${request.weight} kg',
-          ),
-          const SizedBox(height: 8),
-          _DetailRow(
-            icon: Icons.location_on_outlined,
-            label: 'Pickup',
-            value: request.pickupLocation,
-          ),
-          const SizedBox(height: 8),
-          _DetailRow(
-            icon: Icons.location_searching_outlined,
-            label: 'Drop',
-            value: request.dropLocation,
-          ),
-          const SizedBox(height: 8),
-          _DetailRow(
-            icon: Icons.straighten_outlined,
-            label: 'Distance',
-            value: '${request.distance} km',
-          ),
-          if (request.driverName != null) ...[
-            const SizedBox(height: 8),
-            _DetailRow(
-              icon: Icons.person_outline,
-              label: 'Driver',
-              value: request.driverName!,
-            ),
           ],
-        ],
+        ),
       ),
     );
   }
@@ -1288,6 +1771,31 @@ class _DriverRequestCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 6),
+            // Pincode display if available
+            if (request.pickupPincode != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 22),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.location_city,
+                      size: 14,
+                      color: Colors.blue[600],
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Pincode: ${request.pickupPincode}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.blue[700],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (request.pickupPincode != null)
+              const SizedBox(height: 6),
             Row(
               children: [
                 Icon(
@@ -1334,6 +1842,201 @@ class _DriverRequestCard extends StatelessWidget {
                     Icons.touch_app,
                     size: 14,
                     color: Colors.grey[700],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Active Request Card Widget
+class _ActiveRequestCard extends StatelessWidget {
+  final DeliveryRequestModel request;
+
+  const _ActiveRequestCard({required this.request});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => RequestDetailsPage(request: request),
+          ),
+        );
+      },
+      child: CardWidget(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Active Status Badge
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.green[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Colors.green[300]!,
+                  width: 1.5,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.check_circle,
+                    size: 16,
+                    color: Colors.green[700],
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    'ACTIVE REQUEST',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green[800],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Load Type and Weight
+            Row(
+              children: [
+                Icon(Icons.inventory_2, size: 20, color: Colors.grey[700]),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${request.loadType} • ${request.weight.toStringAsFixed(0)} kg',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey[900],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Distance
+            Row(
+              children: [
+                Icon(Icons.route, size: 18, color: Colors.grey[600]),
+                const SizedBox(width: 8),
+                Text(
+                  '${request.distance.toStringAsFixed(1)} km',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey[700],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // Locations Preview
+            Row(
+              children: [
+                Icon(
+                  Icons.location_on,
+                  size: 16,
+                  color: Colors.green[600],
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    request.pickupLocation,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[700],
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            // Pincode display if available
+            if (request.pickupPincode != null)
+              Padding(
+                padding: const EdgeInsets.only(left: 22),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.location_city,
+                      size: 14,
+                      color: Colors.blue[600],
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Pincode: ${request.pickupPincode}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.blue[700],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            if (request.pickupPincode != null)
+              const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(
+                  Icons.location_on,
+                  size: 16,
+                  color: Colors.red[600],
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    request.dropLocation,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[700],
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+
+            // View Details Hint
+            Container(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.green[50],
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    'Tap to view details',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.green[700],
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.touch_app,
+                    size: 14,
+                    color: Colors.green[700],
                   ),
                 ],
               ),

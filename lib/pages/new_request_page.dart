@@ -26,18 +26,21 @@ class _NewRequestPageState extends State<NewRequestPage> {
   final _pickupLocationController = TextEditingController();
   final _dropLocationController = TextEditingController();
   final _distanceController = TextEditingController();
+  final _pincodeController = TextEditingController();
   
   final _pickupFocusNode = FocusNode();
   final _dropFocusNode = FocusNode();
   
   bool _isSubmitting = false;
   bool _isCalculatingDistance = false;
+  bool _showManualPincodeEntry = false;
   String? _pickupPlaceId;
   String? _dropPlaceId;
   double? _pickupLatitude;
   double? _pickupLongitude;
   double? _dropLatitude;
   double? _dropLongitude;
+  String? _pickupPincode;
 
   @override
   void dispose() {
@@ -46,6 +49,7 @@ class _NewRequestPageState extends State<NewRequestPage> {
     _pickupLocationController.dispose();
     _dropLocationController.dispose();
     _distanceController.dispose();
+    _pincodeController.dispose();
     _pickupFocusNode.dispose();
     _dropFocusNode.dispose();
     super.dispose();
@@ -117,6 +121,87 @@ class _NewRequestPageState extends State<NewRequestPage> {
     }
   }
 
+  Future<void> _fetchPickupPincode(String placeId) async {
+    try {
+      final url = Uri.parse(
+        'https://maps.googleapis.com/maps/api/place/details/json'
+        '?place_id=$placeId'
+        '&fields=address_components'
+        '&key=${AppConfig.googleMapsApiKey}',
+      );
+
+      final response = await http.get(url);
+      debugPrint('Pincode API Response Status: ${response.statusCode}');
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        debugPrint('Pincode API Response: ${data['status']}');
+        
+        if (data['status'] == 'OK' && data['result'] != null) {
+          final addressComponents = data['result']['address_components'] as List?;
+          
+          if (addressComponents != null) {
+            debugPrint('Address components found: ${addressComponents.length}');
+            // Look for postal_code in address components
+            bool pincodeFound = false;
+            for (var component in addressComponents) {
+              final types = component['types'] as List?;
+              if (types != null && types.contains('postal_code')) {
+                final pincode = component['long_name'] as String?;
+                setState(() {
+                  _pickupPincode = pincode;
+                  _showManualPincodeEntry = false; // Hide manual entry when auto-fetch succeeds
+                });
+                pincodeFound = true;
+                debugPrint('Pincode found: $pincode');
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Pickup area pincode: $pincode'),
+                      backgroundColor: Colors.green,
+                      duration: const Duration(seconds: 2),
+                    ),
+                  );
+                }
+                break;
+              }
+            }
+            
+            if (!pincodeFound) {
+              debugPrint('No postal_code found in address components');
+              setState(() {
+                _showManualPincodeEntry = true;
+              });
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Pincode not found. Please enter manually below.'),
+                    backgroundColor: Colors.orange,
+                    duration: Duration(seconds: 3),
+                  ),
+                );
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch pincode: $e');
+      setState(() {
+        _showManualPincodeEntry = true;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not fetch pincode. Please enter manually below.'),
+            backgroundColor: Colors.orange,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _submitRequest() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -132,6 +217,11 @@ class _NewRequestPageState extends State<NewRequestPage> {
         throw 'User not authenticated';
       }
 
+      // Use manual pincode if entered, otherwise use auto-fetched pincode
+      final finalPincode = _pincodeController.text.trim().isNotEmpty 
+          ? _pincodeController.text.trim() 
+          : _pickupPincode;
+
       await _deliveryRequestService.createRequest(
         agentId: user.uid,
         agentEmail: user.email ?? '',
@@ -140,6 +230,7 @@ class _NewRequestPageState extends State<NewRequestPage> {
         pickupLocation: _pickupLocationController.text.trim(),
         pickupLatitude: _pickupLatitude,
         pickupLongitude: _pickupLongitude,
+        pickupPincode: finalPincode,
         dropLocation: _dropLocationController.text.trim(),
         dropLatitude: _dropLatitude,
         dropLongitude: _dropLongitude,
@@ -299,7 +390,15 @@ class _NewRequestPageState extends State<NewRequestPage> {
                     _pickupPlaceId = prediction.placeId;
                     _pickupLatitude = double.tryParse(prediction.lat ?? '');
                     _pickupLongitude = double.tryParse(prediction.lng ?? '');
+                    // Reset pincode state when new location is selected
+                    _pickupPincode = null;
+                    _showManualPincodeEntry = false;
+                    _pincodeController.clear();
                   });
+                  // Fetch pincode for the pickup location
+                  if (prediction.placeId != null) {
+                    _fetchPickupPincode(prediction.placeId!);
+                  }
                   if (_dropPlaceId != null) {
                     _calculateDistance();
                   }
@@ -397,6 +496,102 @@ class _NewRequestPageState extends State<NewRequestPage> {
                   return null;
                 },
               ),
+              const SizedBox(height: 16),
+
+              // Pickup Pincode (if available)
+              if (_pickupPincode != null)
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.blue[200]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.location_city, color: Colors.blue[700], size: 20),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Pickup Area Pincode: ',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                      Text(
+                        _pickupPincode!,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.blue[800],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (_pickupPincode != null)
+                const SizedBox(height: 16),
+
+              // Manual Pincode Entry (shown when auto-fetch fails or pincode not found)
+              if (_showManualPincodeEntry || (_pickupLocationController.text.isNotEmpty && _pickupPincode == null)) ...[
+                Text(
+                  'Pickup Area Pincode (Manual Entry)',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.grey[700],
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TextFormField(
+                  controller: _pincodeController,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  decoration: InputDecoration(
+                    hintText: 'Enter 6-digit pincode',
+                    prefixIcon: const Icon(Icons.pin_outlined),
+                    counterText: '',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.grey[300]!),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Colors.grey[300]!),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide(color: Theme.of(context).primaryColor, width: 2),
+                    ),
+                    errorBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Colors.red),
+                    ),
+                    focusedErrorBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: const BorderSide(color: Colors.red, width: 2),
+                    ),
+                    filled: true,
+                    fillColor: Colors.white,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                  ),
+                  validator: (value) {
+                    // Pincode is optional, but if entered should be valid
+                    if (value != null && value.trim().isNotEmpty) {
+                      if (value.trim().length != 6) {
+                        return 'Pincode must be 6 digits';
+                      }
+                      if (!RegExp(r'^\d+$').hasMatch(value.trim())) {
+                        return 'Pincode must contain only numbers';
+                      }
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+              ],
+
               const SizedBox(height: 32),
 
               // Submit Button
